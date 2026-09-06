@@ -1,0 +1,19 @@
+server:
+  port: 8080
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:-}]"
+spring:
+  application:
+    name: app-service
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:nacos:8848}
+        namespace: application
+        group: DEFAULT_GROUP
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

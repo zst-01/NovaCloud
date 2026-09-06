@@ -1,0 +1,245 @@
+# 这是整个 NovaCloud 本地实验环境的 Docker Compose 编排文件。
+# 它不属于某一个 Java 服务，也不是放在容器内部的文件。
+# 当我们在当前目录执行 `docker compose ...` 时，Docker Compose 会读取此文件，
+# 按下面的定义创建并连接 MySQL、Nacos、4 个 Java 服务和 Nginx 等容器。
+#
+# 当前示例请求链：
+# 浏览器 -> Windows 127.0.0.1:18080 -> Nginx:80
+#        -> app-gateway:8080 -> app-service:8080
+#        -> platform-gateway:8080 -> platform-service:8080 -> MySQL:3306
+
+# 这套 Compose 项目的名字。Docker 创建的容器、网络和数据卷会使用它作为名称前缀。
+name: novacloud-lab
+
+# x-java 不是一个真正的服务，而是一份给 Java 服务复用的公共配置。
+# &java 给这段配置取名为 java；后面的 `<<: *java` 表示把它复制到对应服务中。
+x-java: &java
+  # Docker 保存并轮转这些容器的标准输出日志，防止长期实验无限占用磁盘。
+  logging: &request-logging
+    driver: json-file
+    options:
+      max-size: '10m'
+      max-file: '3'
+  # 容器异常退出或 Docker 重启后自动重启；手动停止的容器除外。
+  restart: unless-stopped
+  # 限制每个 Java 容器最多使用 768 MB 内存。
+  mem_limit: 768m
+  # environment 会把环境变量传入容器内的 Java 程序。
+  # &java-env 再给这组公共环境变量取名，方便部分服务扩展它。
+  environment: &java-env
+    # 限制 JVM 堆内存和元空间大小，避免实验环境占用过多电脑内存。
+    JAVA_TOOL_OPTIONS: -Xms128m -Xmx384m -XX:MaxMetaspaceSize=192m
+    # Java 服务连接 Nacos 的地址。
+    # nacos 是下面的 Compose 服务名，由 Docker 内部网络解析；8848 是 Nacos 容器端口。
+    NACOS_ADDR: nacos:8848
+  # healthcheck 用于判断容器里的 Java 服务是否已经真正启动完成。
+  healthcheck:
+    # 在容器内部访问 Spring Boot Actuator 健康检查接口；失败时返回非 0 状态。
+    test: [CMD-SHELL, 'curl -fsS http://localhost:8080/actuator/health || exit 1']
+    # 每 10 秒检查一次，每次最多等 4 秒，连续重试 18 次。
+    interval: 10s
+    timeout: 4s
+    retries: 18
+    # 容器启动后的前 60 秒属于启动期，给 Java 应用预留启动时间。
+    start_period: 60s
+
+# services 下的每个一级名称都是一个 Compose 服务，通常会对应一个容器。
+# 这些服务没有显式声明 networks，因此会自动加入同一个 Compose 默认网络；
+# 它们可以通过 mysql、nacos、app-gateway 等服务名互相访问。
+services:
+  # builder 是临时的 Maven 构建容器，只负责执行项目编译和测试。
+  # 它带有 build profile，普通启动不会运行它；指定 --profile build 时才会启用。
+  builder:
+    environment:
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run scripts/init-env.ps1 first}
+    # image 表示创建容器时使用的镜像。
+    image: maven:3.9.9-eclipse-temurin-17
+    profiles: [build]
+    # 容器内执行命令时使用的工作目录。
+    working_dir: /workspace
+    # volumes 把宿主机目录或 Docker 数据卷挂载到容器内部。
+    volumes:
+      # `.` 是当前项目目录；挂载后，构建容器可在 /workspace 读取项目代码。
+      - .:/workspace
+      # Maven 依赖缓存在名为 maven-cache 的数据卷中，避免每次重新下载。
+      - maven-cache:/root/.m2
+    # 容器启动后执行的命令，相当于运行 Maven 的 clean verify。
+    command: [mvn, -B, -ntp, clean, verify]
+    mem_limit: 2g
+
+  # MySQL 数据库服务，是整条调用链最末端的数据存储。
+  mysql:
+    image: mysql:8.4.4
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      # 第一次初始化数据库时创建 novacloud 数据库和 lab 用户。
+      MYSQL_DATABASE: novacloud
+      MYSQL_USER: lab
+      # ${...} 表示从 Windows 当前环境变量中读取密码，不把密码写死在本文件里。
+      # 如果变量不存在，Compose 会提示先运行 scripts/start.ps1。
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run scripts/start.ps1 first}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run scripts/start.ps1 first}
+    # ports 格式为 `宿主机地址:宿主机端口:容器端口`。
+    # Windows 访问 127.0.0.1:13306 时，Docker 会转发到 MySQL 容器的 3306。
+    ports: ['127.0.0.1:13306:3306']
+    volumes:
+      # 数据库存入 Docker 数据卷，容器重建后数据仍可保留。
+      - mysql-data:/var/lib/mysql
+      # 把宿主机的初始化脚本目录只读挂载到 MySQL 的自动初始化目录。
+      - ./infra/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # 只有能够执行查询并读到 tickets 表，MySQL 才会被标记为 healthy。
+      test: [CMD-SHELL, 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -ulab -D novacloud -e "SELECT 1 FROM tickets LIMIT 1"']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # Redis 为后续登录会话提供存储。本机端口 16379，容器之间使用 redis:6379。
+  redis:
+    image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    restart: unless-stopped
+    logging: *request-logging
+    mem_limit: 512m
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run scripts/init-env.ps1 first}
+    # 通过官方 entrypoint 降权运行，密码在容器内展开，不写进源码。
+    command: [sh, -c, 'exec /usr/local/bin/docker-entrypoint.sh redis-server --appendonly yes --appendfsync everysec --maxmemory 128mb --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
+    ports: ['127.0.0.1:16379:6379']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -qx PONG']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  # Nacos 注册中心。Java 服务会在这里注册自己，并发现同一命名空间里的其他服务。
+  nacos:
+    image: nacos/nacos-server:v2.4.3
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      # standalone 表示单机模式，适合本地学习，不是生产集群方案。
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      # 实验环境关闭鉴权；生产环境不应照搬此配置。
+      NACOS_AUTH_ENABLE: 'false'
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      JVM_XMN: 128m
+    # Windows 的 18848 映射到 Nacos 容器的 8848，供人在宿主机访问 Nacos。
+    # 容器之间仍然直接使用 nacos:8848，不经过 Windows 的 18848。
+    ports: ['127.0.0.1:18848:8848']
+    volumes:
+      - nacos-data:/home/nacos/data
+    healthcheck:
+      # 调用 Nacos 自带的就绪接口，确认它已经可以提供服务。
+      test: [CMD-SHELL, 'curl -fsS http://localhost:8848/nacos/v1/console/health/readiness || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
+
+  # 中台层业务服务：处理实际业务并访问 MySQL。
+  platform-service:
+    # 合并前面 &java 定义的公共 Java 容器配置。
+    <<: *java
+    image: novacloud-lab/platform-service:0.1.0
+    # 如果本地还没有此镜像，使用当前目录和 platform-service 模块构建它。
+    build:
+      context: .
+      args: {MODULE: platform-service}
+    environment:
+      # 先继承公共 Java 环境变量，再增加本服务需要的 MySQL 配置。
+      <<: *java-env
+      MYSQL_USER: lab
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run scripts/start.ps1 first}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run scripts/init-env.ps1 first}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:?Run scripts/init-env.ps1 first}
+    # depends_on 描述启动依赖：MySQL 和 Nacos 健康后，再启动此服务。
+    # 它只管理启动顺序，不代表 platform-service 的所有业务调用都会经过 Nacos。
+    depends_on:
+      mysql: {condition: service_healthy}
+      nacos: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  # 中台层网关：接收 app-service 转来的请求，再路由到 platform-service。
+  platform-gateway:
+    <<: *java
+    environment:
+      <<: *java-env
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run scripts/init-env.ps1 first}
+    image: novacloud-lab/platform-gateway:0.1.0
+    build:
+      context: .
+      args: {MODULE: platform-gateway}
+    # platform-service 健康后再启动中台网关。
+    depends_on:
+      platform-service: {condition: service_healthy}
+
+  # 应用层业务服务：本实验中主要负责中转，继续调用中台层网关。
+  app-service:
+    <<: *java
+    image: novacloud-lab/app-service:0.1.0
+    build:
+      context: .
+      args: {MODULE: app-service}
+    environment:
+      <<: *java-env
+      # 通过明确配置的内部 URL 调用中台网关。
+      # platform-gateway 是 Docker 服务名，8080 是其容器内部端口；这一跳不使用 Nacos。
+      PLATFORM_GATEWAY_URL: http://platform-gateway:8080
+    depends_on:
+      platform-gateway: {condition: service_healthy}
+
+  # 应用层网关：接收 Nginx 转来的请求，再通过 Nacos 发现并路由到 app-service。
+  app-gateway:
+    <<: *java
+    environment:
+      <<: *java-env
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run scripts/init-env.ps1 first}
+    image: novacloud-lab/app-gateway:0.1.0
+    build:
+      context: .
+      args: {MODULE: app-gateway}
+    depends_on:
+      app-service: {condition: service_healthy}
+
+  # 整条请求链的统一入口 Nginx，也是浏览器首先访问的容器服务。
+  nginx:
+    logging: *request-logging
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+    # 浏览器访问 Windows 的 127.0.0.1:18080；Docker 转发到 Nginx 容器的 80。
+    # 所以 Nginx 只需监听容器内部的 80，并不知道宿主机使用的是 18080。
+    ports: ['127.0.0.1:18080:80']
+    volumes:
+      # 把项目里的 Nginx 配置文件挂载成容器内部真正读取的 nginx.conf。
+      # :ro 表示只读，容器不能修改宿主机上的原文件。
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    # app-gateway 健康后再启动 Nginx，减少入口已启动但后端尚不可用的情况。
+    depends_on:
+      app-gateway: {condition: service_healthy}
+    healthcheck:
+      # 这是在 Nginx 容器内部访问自己的 80 端口，与宿主机的 18080 无关。
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+# volumes 声明由 Docker 管理的持久化数据卷。
+# 它们不是项目源码目录；删除容器时通常不会自动删除这些数据卷。
+volumes:
+  # 保存 Redis AOF 数据，普通 down 不删除。
+  redis-data:
+  # 保存 MySQL 数据。
+  mysql-data:
+  # 保存 Nacos 数据。
+  nacos-data:
+  # 保存 Maven 已下载的依赖。
+  maven-cache:
