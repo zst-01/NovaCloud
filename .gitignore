@@ -4,3 +4,4 @@
 output/playwright/
 .idea/
 *.log
+.k8s-local/

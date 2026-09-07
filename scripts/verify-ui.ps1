@@ -1,6 +1,7 @@
 #requires -Version 7.0
+param([string]$BaseUrl = 'http://127.0.0.1:18080')
 $ErrorActionPreference='Stop'
-$base='http://127.0.0.1:18080'
+$base=$BaseUrl
 $page=Invoke-WebRequest $base -SkipHttpErrorCheck
 if ($page.StatusCode -ne 200 -or $page.Content -notmatch '工单工作台') { throw '首页尚未提供工单工作台' }
 foreach ($asset in @('app.js','styles.css')) {

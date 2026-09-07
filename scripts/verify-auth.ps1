@@ -1,7 +1,8 @@
 #requires -Version 7.0
-param([string]$BaseUrl = 'http://127.0.0.1:18080', [switch]$IncludeFailure)
+param([string]$BaseUrl = 'http://127.0.0.1:18080', [switch]$IncludeFailure, [ValidateSet('Compose','Kubernetes')][string]$Runtime = 'Compose')
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/auth-session.ps1"
+. "$PSScriptRoot/container-runtime.ps1"
 Push-Location (Split-Path $PSScriptRoot -Parent)
 $demo = $null
 $observer = $null
@@ -15,9 +16,9 @@ function Invoke-SessionRedis($Headers, [string]$Operation) {
     # token 通过标准输入传递，不出现在命令参数和输出中；只操作本脚本创建的会话。
     $token = $Headers.Authorization.Substring(7)
     if ($Operation -eq 'TTL') {
-        $result = @($token | docker compose exec -T redis sh -c 'token=$(tr -d "\r\n"); REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli --raw TTL "lab:session:$token"')
+        $result = @(Invoke-LabContainer redis @('sh','-c','token=$(tr -d "\r\n"); REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli --raw TTL "lab:session:$token"') -InputText $token)
     } else {
-        $result = @($token | docker compose exec -T redis sh -c 'token=$(tr -d "\r\n"); REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli --raw EXPIRE "lab:session:$token" 1')
+        $result = @(Invoke-LabContainer redis @('sh','-c','token=$(tr -d "\r\n"); REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli --raw EXPIRE "lab:session:$token" 1') -InputText $token)
     }
     if ($LASTEXITCODE -ne 0) { throw '测试会话 TTL 操作失败' }
     return [long]($result -join '')
@@ -51,12 +52,12 @@ try {
         Assert-Status $r 403 '特殊路径不能绕过权限'
     }
     foreach ($service in @('platform-gateway','platform-service')) {
-        $status = docker compose exec -T $service curl -sS -o /dev/null -w '%{http_code}' http://localhost:8080/api/tickets/1
+        $status = Invoke-LabContainer $service @('curl','-sS','-o','/dev/null','-w','%{http_code}','http://localhost:8080/api/tickets/1')
         if ($LASTEXITCODE -ne 0 -or "$status" -ne '401') { throw "$service 直接访问未拒绝匿名请求" }
-        $status = "Authorization: $($observer.Authorization)" | docker compose exec -T $service curl -sS -H '@-' -o /dev/null -w '%{http_code}' http://localhost:8080/api/tickets/1
+        $status = Invoke-LabContainer $service @('curl','-sS','-H','@-','-o','/dev/null','-w','%{http_code}','http://localhost:8080/api/tickets/1') -InputText "Authorization: $($observer.Authorization)"
         if ($LASTEXITCODE -ne 0 -or "$status" -ne '403') { throw "$service 直接访问未执行权限检查" }
         Write-Host "PASS: $service 直接访问也校验会话及权限"
-        $status = "Authorization: $($observer.Authorization)" | docker compose exec -T $service curl --path-as-is -sS -H '@-' -o /dev/null -w '%{http_code}' http://localhost:8080/actuator/health/../../api/tickets/1
+        $status = Invoke-LabContainer $service @('curl','--path-as-is','-sS','-H','@-','-o','/dev/null','-w','%{http_code}','http://localhost:8080/actuator/health/../../api/tickets/1') -InputText "Authorization: $($observer.Authorization)"
         if ($LASTEXITCODE -ne 0 -or "$status" -notin @('400','403')) { throw "$service 健康路径前缀绕过检查失败" }
     }
     $expiring = New-LabSession -BaseUrl $BaseUrl
@@ -66,12 +67,12 @@ try {
     Assert-Status $r 401 '真实 Redis 会话过期后失效'
     if ($IncludeFailure) {
         try {
-            docker compose stop redis
+            Set-LabComponent redis Stop
             if ($LASTEXITCODE -ne 0) { throw '停止 Redis 失败' }
             $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers $demo -SkipHttpErrorCheck -TimeoutSec 20
             Assert-Status $r 503 'Redis 停机时不放行'
         } finally {
-            docker compose up -d --wait --wait-timeout 180
+            Set-LabComponent redis Start
             if ($LASTEXITCODE -ne 0) { throw '故障实验后服务未恢复健康' }
         }
         $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers $demo -TimeoutSec 20
@@ -84,7 +85,7 @@ try {
     if ((Invoke-SessionRedis $demo 'TTL') -ne -2) { throw '退出后会话 key 未删除' }
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
-        $lines = @(docker compose logs --since 5m --no-color nginx app-gateway app-service platform-gateway platform-service 2>&1)
+        $lines = @(Get-LabLogs)
         if ($LASTEXITCODE -ne 0) { throw '读取鉴权日志失败' }
         $denied = @($lines | Where-Object { "$_".Contains($deniedTrace) -and "$_" -match 'request_complete' })
         if ($denied.Count -ge 2) { break }

@@ -1,0 +1,16 @@
+# Spring Boot 的标准环境变量覆盖各模块 application.yml 中的 Docker 主机名。
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: java-config, namespace: novacloud-app}
+data:
+  JAVA_TOOL_OPTIONS: -Xms128m -Xmx384m -XX:MaxMetaspaceSize=192m
+  NACOS_ADDR: nacos.novacloud-infra.svc.cluster.local:8848
+  SPRING_DATA_REDIS_HOST: redis.novacloud-infra.svc.cluster.local
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: java-config, namespace: novacloud-platform}
+data:
+  JAVA_TOOL_OPTIONS: -Xms128m -Xmx384m -XX:MaxMetaspaceSize=192m
+  NACOS_ADDR: nacos.novacloud-infra.svc.cluster.local:8848
+  SPRING_DATA_REDIS_HOST: redis.novacloud-infra.svc.cluster.local

@@ -1,7 +1,8 @@
 #requires -Version 7.0
-param([string]$BaseUrl='http://127.0.0.1:18080', [int]$LoginLimit=10, [int]$TicketLimit=20, [switch]$IncludeFailure)
+param([string]$BaseUrl='http://127.0.0.1:18080', [int]$LoginLimit=10, [int]$TicketLimit=20, [switch]$IncludeFailure, [ValidateSet('Compose','Kubernetes')][string]$Runtime = 'Compose')
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/auth-session.ps1"
+. "$PSScriptRoot/container-runtime.ps1"
 Push-Location (Split-Path $PSScriptRoot -Parent)
 $first = $null
 $second = $null
@@ -72,20 +73,20 @@ try {
     Write-Host 'PASS: 工单窗口到期后恢复查询'
     if ($IncludeFailure) {
         try {
-            docker compose stop redis
+            Set-LabComponent redis Stop
             if ($LASTEXITCODE -ne 0) { throw '停止 Redis 失败' }
             $r = Invoke-WebRequest "$BaseUrl/api/auth/login" -Method Post -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck -TimeoutSec 20
             if ($r.StatusCode -ne 503 -or ($r.Content | ConvertFrom-Json).error -ne 'rate_limit_unavailable') { throw 'Redis 故障时登录限流未拒绝访问' }
             Write-Host 'PASS: Redis 故障时登录限流返回 503'
         } finally {
-            docker compose up -d --wait --wait-timeout 180
+            Set-LabComponent redis Start
             if ($LASTEXITCODE -ne 0) { throw 'Redis 故障实验后服务未恢复健康' }
         }
     }
     $traces = @($loginResults + $ticketResults | Where-Object Status -eq 429 | ForEach-Object { $_.Trace })
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
-        $lines = @(docker compose logs --since 5m --no-color nginx app-gateway app-service platform-gateway platform-service 2>&1)
+        $lines = @(Get-LabLogs)
         if ($LASTEXITCODE -ne 0) { throw '读取限流日志失败' }
         $complete = $true
         foreach ($trace in $traces) {

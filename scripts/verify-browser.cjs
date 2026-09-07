@@ -13,7 +13,7 @@ const check = (value, label) => { if (!value) throw new Error(label); };
   const runtimeErrors = [];
   page.on('pageerror', error => runtimeErrors.push(error.name));
   page.on('request', req => { const header = req.headers().authorization; if (header) tokens.add(header.slice(7)); });
-  const base = 'http://127.0.0.1:18080';
+  const base = process.env.LAB_BASE_URL || 'http://127.0.0.1:18080';
   const output = path.join(root, 'output', 'playwright');
   fs.mkdirSync(output, { recursive: true });
   const status = async code => page.waitForFunction(code => document.querySelector('#request-status').textContent === String(code), code);

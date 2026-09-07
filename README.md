@@ -2,6 +2,18 @@
 
 这是一个本地学习项目，复现双层网关和双 Nacos 命名空间的请求链路。当前包含 8 个长期运行的容器：Nginx、两个网关、两个 Java 业务服务、Nacos、MySQL、Redis。builder 是临时编译测试容器。
 
+## Kubernetes 运行入口
+
+已提供 Docker Desktop 单节点 Kubernetes 部署，与原 Compose 使用独立数据卷。完整说明见 [Kubernetes学习与操作](docs/Kubernetes学习与操作.md)。
+
+```powershell
+pwsh.exe -NoProfile -File .\scripts\start-k8s.ps1
+```
+
+工作台：<http://127.0.0.1:28080>；Nacos：<http://127.0.0.1:28848/nacos>。如果 Pod 已运行、只是浏览器打不开，执行 `pwsh.exe -NoProfile -File .\scripts\k8s-forward.ps1` 恢复本机转发。停止本项目使用 `scripts/stop-k8s.ps1`，保留数据卷。
+
+下文启动命令和 18080/18848 端口仍对应 Compose。两套数据库首次复制后独立变化，不自动同步。
+
 ## 请求如何走
 
 ```mermaid
@@ -14,11 +26,11 @@ flowchart LR
       PG[platform-gateway] -->|Nacos 发现 platform-service| PS[platform-service]
     end
     Nginx --> AG
-    AS -->|配置 URL / Docker DNS| PG
+    AS -->|配置 URL / 内部 DNS| PG
     PS --> MySQL
 ```
 
-命名空间描述服务注册与发现的范围，服务进程本身运行在 Docker 容器中。所有容器目前使用同一实验网络，两个 Nacos 命名空间不等于两个网络隔离区。
+图中的命名空间描述 Nacos 服务注册与发现的范围。Compose 模式下所有容器使用同一实验网络；Kubernetes 模式下资源分布在应用、中台和基础设施三个命名空间。两种模式均未配置层间网络隔离，Nacos 命名空间也不等于网络隔离区。
 
 应用层的 `PLATFORM_GATEWAY_URL=http://platform-gateway:8080` 模拟工作项目中部署配置提供的内网地址。Docker DNS 把这个名称解析到中台网关容器；两层网关各自通过 `lb://服务名` 和 Nacos 找到同层业务服务。这里不使用 Nacos 配置中心，仅使用其注册发现功能。
 
@@ -118,7 +130,7 @@ docker compose down
 
 版本依据：[Spring Cloud Alibaba 2023 分支说明](https://sca.aliyun.com/en/docs/2023/overview/version-explain/)、[2023.0.3.2 发布记录](https://github.com/alibaba/spring-cloud-alibaba/releases/tag/2023.0.3.2)、[Nacos Docker 文档](https://www.nacos.io/zh-cn/docs/quick-start-docker.html)。具体兼容性以本项目构建和实测记录为准。
 
-HTTP TraceId 传播和日志关联已实现，操作见 [TraceId学习与操作](docs/TraceId学习与操作.md)。Redis 说明见 [Redis学习与操作](docs/Redis学习与操作.md)。登录、退出和会话权限控制见 [登录鉴权学习与操作](docs/登录鉴权学习与操作.md)。登录与工单限流见 [限流学习与操作](docs/限流学习与操作.md)：默认同 IP 30 秒 10 次登录、同用户 10 秒 20 次工单请求，超额返回 429 和 Retry-After。Kafka 按用户要求暂不接入，Kubernetes 尚未迁移。当前 Nacos 使用单机无鉴权模式、所有对外端口仅绑定本机回环地址。
+HTTP TraceId 传播和日志关联已实现，操作见 [TraceId学习与操作](docs/TraceId学习与操作.md)。Redis 说明见 [Redis学习与操作](docs/Redis学习与操作.md)。登录、退出和会话权限控制见 [登录鉴权学习与操作](docs/登录鉴权学习与操作.md)。登录与工单限流见 [限流学习与操作](docs/限流学习与操作.md)：默认同 IP 30 秒 10 次登录、同用户 10 秒 20 次工单请求，超额返回 429 和 Retry-After。Kafka 按用户要求暂不接入，Kubernetes 部署见 [Kubernetes学习与操作](docs/Kubernetes学习与操作.md)。当前 Nacos 使用单机无鉴权模式，项目浏览器入口仅绑定本机回环地址。
 
 日志查询入口是 `scripts/show-trace.ps1 -TraceId 编号`；正常启动脚本会自动运行 `scripts/verify-trace.ps1`。四个 Java 容器和 Nginx 已配置每文件 10MB、最多 3 个文件的 Docker 日志轮转；容器重建会失去旧容器日志。
 

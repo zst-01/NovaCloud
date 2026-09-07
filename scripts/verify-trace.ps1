@@ -1,6 +1,7 @@
 #requires -Version 7.0
-param([string]$BaseUrl = 'http://127.0.0.1:18080', [switch]$IncludeFailure)
+param([string]$BaseUrl = 'http://127.0.0.1:18080', [switch]$IncludeFailure, [ValidateSet('Compose','Kubernetes')][string]$Runtime = 'Compose', [string]$NacosUrl = 'http://127.0.0.1:18848/nacos')
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/container-runtime.ps1"
 Push-Location (Split-Path $PSScriptRoot -Parent)
 try {
     . "$PSScriptRoot/auth-session.ps1"
@@ -31,20 +32,20 @@ try {
     foreach ($sample in $parallel) { $samples.Add($sample) }
     if ($IncludeFailure) {
         try {
-            docker compose stop platform-gateway
+            Set-LabComponent platform-gateway Stop
             if ($LASTEXITCODE -ne 0) { throw '停止中台网关失败' }
             $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers $authHeaders -SkipHttpErrorCheck -TimeoutSec 20
             if ($r.StatusCode -notin @(502,504)) { throw "故障应返回 502 或 504，实际 $($r.StatusCode)" }
             $samples.Add(@{Trace=@($r.Headers['X-Trace-Id'])[0];Status=[int]$r.StatusCode;Hops=@('nginx','app-gateway','app-service')})
         } finally {
-            docker compose up -d --wait --wait-timeout 180 platform-gateway
+            Set-LabComponent platform-gateway Start
             if ($LASTEXITCODE -ne 0) { throw '恢复中台网关失败' }
         }
     }
     if (@($samples.Trace | Select-Object -Unique).Count -ne $samples.Count) { throw '不同请求出现相同或缺失的 TraceId' }
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
-        $lines = @(docker compose logs --since 5m --no-color nginx app-gateway app-service platform-gateway platform-service 2>&1)
+        $lines = @(Get-LabLogs)
         if ($LASTEXITCODE -ne 0) { throw '无法读取 Docker 日志' }
         $pending = @()
         foreach ($sample in $samples) {
@@ -64,5 +65,5 @@ try {
     if ($pending.Count -gt 0) { throw "日志验证未通过: $($pending -join '; ')" }
     foreach ($sample in $samples) { Write-Host "PASS traceId=$($sample.Trace) status=$($sample.Status) hops=$($sample.Hops -join ',')" }
     Write-Host "TraceId 验收通过：$($samples.Count) 个请求，包括 6 个并发请求。"
-    if ($IncludeFailure) { & "$PSScriptRoot/verify.ps1" }
+    if ($IncludeFailure) { & "$PSScriptRoot/verify.ps1" -BaseUrl $BaseUrl -NacosUrl $NacosUrl }
 } finally { try { Remove-LabSession -Headers $authHeaders -BaseUrl $BaseUrl } finally { Pop-Location } }

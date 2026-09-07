@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: mysql-data, namespace: novacloud-infra}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 2Gi}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: mysql, namespace: novacloud-infra}
+spec:
+  selector: {app: mysql}
+  ports: [{port: 3306, targetPort: 3306}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: mysql, namespace: novacloud-infra}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: mysql}
+  template:
+    metadata:
+      labels: {app: mysql, app.kubernetes.io/part-of: novacloud}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: mysql
+          image: mysql:8.4.4
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 3306}]
+          env:
+            - {name: MYSQL_DATABASE, value: novacloud}
+            - {name: MYSQL_USER, value: lab}
+          envFrom:
+            - secretRef: {name: mysql-credentials}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/mysql}
+          startupProbe:
+            exec:
+              command: [sh, -c, 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -ulab -D novacloud -e "SELECT 1"']
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [sh, -c, 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -ulab -D novacloud -e "SELECT 1"']
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: mysql-data}

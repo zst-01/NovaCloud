@@ -1,15 +1,16 @@
 #requires -Version 7.0
-param([switch]$Restart)
+param([switch]$Restart, [ValidateSet('Compose','Kubernetes')][string]$Runtime = 'Compose')
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/container-runtime.ps1"
 Push-Location (Split-Path $PSScriptRoot -Parent)
 function Invoke-LabRedis([string[]]$CommandArgs) {
-    $reply = @(docker compose exec -T redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli --raw "$@"' redis-cli @CommandArgs)
+    $reply = @(Invoke-LabContainer redis (@('sh','-c','REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli --raw "$@"','redis-cli') + $CommandArgs))
     if ($LASTEXITCODE -ne 0) { throw 'Redis 命令执行失败' }
     return $reply
 }
 $key = 'lab:verify:' + [Guid]::NewGuid().ToString('N')
 try {
-    $unauthenticated = @(docker compose exec -T redis redis-cli ping)
+    $unauthenticated = @(Invoke-LabContainer redis @('redis-cli','ping'))
     if ($LASTEXITCODE -ne 0 -or ($unauthenticated -join '') -notmatch 'NOAUTH') { throw 'Redis 必须拒绝未认证连接' }
     if ((Invoke-LabRedis -CommandArgs @('PING')) -ne 'PONG') { throw 'Redis PING 失败' }
     Write-Host 'PASS: 未认证连接被拒绝，认证连接 PING 成功'
@@ -32,17 +33,17 @@ try {
     if ($Restart) {
         if ((Invoke-LabRedis -CommandArgs @('SET',$key,'restart-ok','EX','120')) -ne 'OK') { throw '准备重启样本失败' }
         try {
-            docker compose restart redis
+            Set-LabComponent redis Restart
             if ($LASTEXITCODE -ne 0) { throw 'Redis 重启失败' }
         } finally {
-            docker compose up -d --wait --wait-timeout 120 redis
+            Set-LabComponent redis Start
             if ($LASTEXITCODE -ne 0) { throw 'Redis 恢复健康失败' }
         }
         if ((Invoke-LabRedis -CommandArgs @('GET',$key)) -ne 'restart-ok') { throw '重启后样本数据丢失' }
         Write-Host 'PASS: Redis 正常重启后保留测试数据'
     }
     # 这是运行中的 Java 服务通过 Lettuce 访问 Redis 的健康结果，不只是 TCP 端口检查。
-    $health = @(docker compose exec -T platform-service curl -fsS http://localhost:8080/actuator/health/redis)
+    $health = @(Invoke-LabContainer platform-service @('curl','-fsS','http://localhost:8080/actuator/health/redis'))
     if ($LASTEXITCODE -ne 0 -or (($health -join '') | ConvertFrom-Json).status -ne 'UP') { throw '中台 Java Redis 健康检查失败' }
     Write-Host 'PASS: 中台 Java 服务的 Redis 健康状态为 UP'
 } finally {

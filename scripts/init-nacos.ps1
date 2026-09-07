@@ -1,5 +1,6 @@
+param([string]$NacosUrl = 'http://127.0.0.1:18848/nacos')
 $ErrorActionPreference = 'Stop'
-$base = 'http://127.0.0.1:18848/nacos/v1/console/namespaces'
+$base = "$NacosUrl/v1/console/namespaces"
 $existing = Invoke-RestMethod $base -TimeoutSec 10
 foreach ($id in @('application','platform')) {
     if ($existing.data.namespace -notcontains $id) {
