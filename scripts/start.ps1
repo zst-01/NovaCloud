@@ -23,7 +23,9 @@ try {
     docker compose exec -T nginx nginx -s reload
     if ($LASTEXITCODE -ne 0) { throw 'Nginx 配置重载失败' }
     & "$PSScriptRoot/verify.ps1"
+    & "$PSScriptRoot/verify-ui.ps1"
     & "$PSScriptRoot/verify-trace.ps1"
     & "$PSScriptRoot/verify-redis.ps1"
     & "$PSScriptRoot/verify-auth.ps1"
+    & "$PSScriptRoot/verify-rate.ps1"
 } finally { Pop-Location }

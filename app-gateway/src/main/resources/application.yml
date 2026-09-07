@@ -26,10 +26,32 @@ spring.cloud.gateway:
     connect-timeout: 2000
     response-timeout: 8s
   routes:
-    - id: app-service
+    - id: app-login
       uri: lb://app-service
       predicates:
-        - Path=/api/tickets/**,/api/auth/**
+        - Path=/api/auth/login
+        - Method=POST
       filters:
         - AddResponseHeader=X-Lab-App-Gateway, visited
+    - id: app-tickets
+      uri: lb://app-service
+      predicates:
+        - Path=/api/tickets/**
+      filters:
+        - AddResponseHeader=X-Lab-App-Gateway, visited
+    - id: app-auth
+      uri: lb://app-service
+      predicates:
+        - Path=/api/auth/**
+      filters:
+        - AddResponseHeader=X-Lab-App-Gateway, visited
+
+# 本机学习阈值，计数保存在 Redis；修改后重新构建应用网关镜像。
+lab.rate:
+  login:
+    limit: 10
+    window-seconds: 30
+  tickets:
+    limit: 20
+    window-seconds: 10
 

@@ -23,31 +23,31 @@ function Invoke-SessionRedis($Headers, [string]$Operation) {
     return [long]($result -join '')
 }
 try {
-    $r = Invoke-WebRequest "$BaseUrl/api/tickets/1" -SkipHttpErrorCheck -TimeoutSec 15
+    $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -SkipHttpErrorCheck -TimeoutSec 15
     Assert-Status $r 401 '未登录查询被拒绝'
     $deniedTrace = @($r.Headers['X-Trace-Id'])[0]
-    $r = Invoke-WebRequest "$BaseUrl/api/tickets/1" -Headers @{'X-User-Id'='demo';'X-User-Roles'='admin';Authorization='Bearer invalid'} -SkipHttpErrorCheck
+    $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers @{'X-User-Id'='demo';'X-User-Roles'='admin';Authorization='Bearer invalid'} -SkipHttpErrorCheck
     Assert-Status $r 401 '伪造身份和无效 token 被拒绝'
-    $r = Invoke-WebRequest "$BaseUrl/api/auth/login" -Method Post -ContentType 'application/json' -Body '{"username":"demo","password":"deliberately-wrong"}' -SkipHttpErrorCheck
+    $r = Invoke-LabWebRequest "$BaseUrl/api/auth/login" -Method Post -ContentType 'application/json' -Body '{"username":"demo","password":"deliberately-wrong"}' -SkipHttpErrorCheck
     Assert-Status $r 401 '错误密码被拒绝'
-    $r = Invoke-WebRequest "$BaseUrl/api/auth/login" -Method Post -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck
+    $r = Invoke-LabWebRequest "$BaseUrl/api/auth/login" -Method Post -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck
     Assert-Status $r 400 '缺失登录字段被拒绝'
     $demo = New-LabSession -BaseUrl $BaseUrl
     $observer = New-LabSession -BaseUrl $BaseUrl -Username observer
     $ttl = Invoke-SessionRedis $demo 'TTL'
     if ($ttl -le 1700 -or $ttl -gt 1800) { throw '新会话 TTL 不符合 30 分钟约定' }
     Write-Host 'PASS: 登录成功，真实 Redis 会话 TTL 为 30 分钟'
-    $r = Invoke-WebRequest "$BaseUrl/api/auth/me" -Headers $demo
+    $r = Invoke-LabWebRequest "$BaseUrl/api/auth/me" -Headers $demo
     Assert-Status $r 200 '查询当前用户'
     $me = $r.Content | ConvertFrom-Json
     if ($me.username -ne 'demo' -or $me.permissions -notcontains 'ticket:read') { throw '当前用户信息不符' }
-    $r = Invoke-WebRequest "$BaseUrl/api/tickets/1" -Headers $demo
+    $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers $demo
     Assert-Status $r 200 '登录后查询工单'
     if (($r.Content | ConvertFrom-Json).id -ne 1) { throw '工单返回不符' }
-    $r = Invoke-WebRequest "$BaseUrl/api/tickets/1" -Headers ($observer + @{'X-User-Roles'='admin'}) -SkipHttpErrorCheck
+    $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers ($observer + @{'X-User-Roles'='admin'}) -SkipHttpErrorCheck
     Assert-Status $r 403 '无查询权限账号不能靠身份头提权'
     foreach ($path in @('/api/%74ickets/1','/api/tickets;x=y/1')) {
-        $r = Invoke-WebRequest "$BaseUrl$path" -Headers $observer -SkipHttpErrorCheck
+        $r = Invoke-LabWebRequest "$BaseUrl$path" -Headers $observer -SkipHttpErrorCheck
         Assert-Status $r 403 '特殊路径不能绕过权限'
     }
     foreach ($service in @('platform-gateway','platform-service')) {
@@ -62,24 +62,24 @@ try {
     $expiring = New-LabSession -BaseUrl $BaseUrl
     if ((Invoke-SessionRedis $expiring 'EXPIRE') -ne 1) { throw '缩短测试会话 TTL 失败' }
     Start-Sleep -Seconds 2
-    $r = Invoke-WebRequest "$BaseUrl/api/auth/me" -Headers $expiring -SkipHttpErrorCheck
+    $r = Invoke-LabWebRequest "$BaseUrl/api/auth/me" -Headers $expiring -SkipHttpErrorCheck
     Assert-Status $r 401 '真实 Redis 会话过期后失效'
     if ($IncludeFailure) {
         try {
             docker compose stop redis
             if ($LASTEXITCODE -ne 0) { throw '停止 Redis 失败' }
-            $r = Invoke-WebRequest "$BaseUrl/api/tickets/1" -Headers $demo -SkipHttpErrorCheck -TimeoutSec 20
+            $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers $demo -SkipHttpErrorCheck -TimeoutSec 20
             Assert-Status $r 503 'Redis 停机时不放行'
         } finally {
             docker compose up -d --wait --wait-timeout 180
             if ($LASTEXITCODE -ne 0) { throw '故障实验后服务未恢复健康' }
         }
-        $r = Invoke-WebRequest "$BaseUrl/api/tickets/1" -Headers $demo -TimeoutSec 20
+        $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers $demo -TimeoutSec 20
         Assert-Status $r 200 'Redis 恢复后原会话可查询'
     }
-    $r = Invoke-WebRequest "$BaseUrl/api/auth/logout" -Method Post -Headers $demo
+    $r = Invoke-LabWebRequest "$BaseUrl/api/auth/logout" -Method Post -Headers $demo
     Assert-Status $r 200 '退出登录'
-    $r = Invoke-WebRequest "$BaseUrl/api/tickets/1" -Headers $demo -SkipHttpErrorCheck
+    $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers $demo -SkipHttpErrorCheck
     Assert-Status $r 401 '退出后原 token 立即失效'
     if ((Invoke-SessionRedis $demo 'TTL') -ne -2) { throw '退出后会话 key 未删除' }
     $deadline = [DateTime]::UtcNow.AddSeconds(10)

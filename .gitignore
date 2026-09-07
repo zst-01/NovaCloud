@@ -1,4 +1,6 @@
 **/target/
 .env
+.playwright-cli/
+output/playwright/
 .idea/
 *.log

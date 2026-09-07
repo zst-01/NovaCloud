@@ -7,7 +7,7 @@ function Assert-Lab($Condition, [string]$Message) {
     if (-not $Condition) { throw "FAIL: $Message" }
     Write-Host "PASS: $Message"
 }
-try { $response = Invoke-WebRequest "$BaseUrl/api/tickets/1" -Headers $authHeaders -TimeoutSec 15 } catch { throw "FAIL: 入口尚未提供完整查询能力: $($_.Exception.Message)" }
+try { $response = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers $authHeaders -TimeoutSec 15 } catch { throw "FAIL: 入口尚未提供完整查询能力: $($_.Exception.Message)" }
 Assert-Lab ($response.StatusCode -eq 200) '入口返回 200'
 $ticket = $response.Content | ConvertFrom-Json
 Assert-Lab ($ticket.id -eq 1 -and $ticket.title -eq 'Demo after-sales ticket' -and $ticket.status -eq 'OPEN') '返回 MySQL 演示记录'
@@ -15,7 +15,7 @@ foreach ($hop in @('Nginx','App-Gateway','App-Service','Platform-Gateway','Platf
     Assert-Lab ($response.Headers["X-Lab-$hop"] -eq 'visited') "经过 $hop"
 }
 foreach ($case in @(@{Id='999999';Code=404},@{Id='invalid';Code=400})) {
-    $r = Invoke-WebRequest "$BaseUrl/api/tickets/$($case.Id)" -Headers $authHeaders -SkipHttpErrorCheck -TimeoutSec 15
+    $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/$($case.Id)" -Headers $authHeaders -SkipHttpErrorCheck -TimeoutSec 15
     Assert-Lab ($r.StatusCode -eq $case.Code) "ID=$($case.Id) 返回 $($case.Code)"
 }
 foreach ($ns in @(@{Id='application';Names=@('app-gateway','app-service')},@{Id='platform';Names=@('platform-gateway','platform-service')})) {

@@ -7,7 +7,7 @@ try {
     try {
         docker compose stop platform-gateway
         if ($LASTEXITCODE -ne 0) { throw '停止中台网关失败' }
-        $response = Invoke-WebRequest 'http://127.0.0.1:18080/api/tickets/1' -Headers $authHeaders -SkipHttpErrorCheck -TimeoutSec 20
+        $response = Invoke-LabWebRequest 'http://127.0.0.1:18080/api/tickets/1' -Headers $authHeaders -SkipHttpErrorCheck -TimeoutSec 20
         $body = $response.Content | ConvertFrom-Json
         $expected = ($response.StatusCode -eq 502 -and $body.error -eq 'platform_unavailable') -or
                     ($response.StatusCode -eq 504 -and $body.error -eq 'platform_timeout')

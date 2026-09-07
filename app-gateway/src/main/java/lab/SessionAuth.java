@@ -37,6 +37,8 @@ class SessionAuth implements WebFilter {
                 try {
                     var user = mapper.readTree(value);
                     if (!user.path("username").isTextual() || !user.path("permissions").isArray()) return 503;
+                    // 服务端会话中的主键，仅放到本次 exchange 属性，不接受客户端身份头。
+                    clean.getAttributes().put("lab.auth.username", user.path("username").asText());
                     if (path.equals("/api/auth/me") || path.equals("/api/auth/logout")) return 200;
                     for (var permission : user.path("permissions")) if (permission.asText().equals("ticket:read")) return 200;
                     return 403;

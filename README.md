@@ -62,6 +62,7 @@ pwsh.exe -NoProfile -File .\scripts\start.ps1 -SkipBuild
 
 | 用途 | 地址 |
 | --- | --- |
+| 浏览器工单工作台 | http://127.0.0.1:18080/ |
 | 完整请求查询 | http://127.0.0.1:18080/api/tickets/1 |
 | Nacos 控制台 | http://127.0.0.1:18848/nacos/ |
 | MySQL | 127.0.0.1:13306，库 novacloud，用户 lab，密码见本地 .env |
@@ -69,7 +70,9 @@ pwsh.exe -NoProfile -File .\scripts\start.ps1 -SkipBuild
 
 当前接口需要先登录，直接在浏览器访问会返回 401。运行步骤和账号说明见 [登录鉴权学习与操作](docs/登录鉴权学习与操作.md)。验收脚本会自动登录并清理自己的测试会话。
 
-登录阶段实测：46 个 Java 测试通过，8 个容器健康；登录、权限、过期、退出及故障恢复均已验证。当前提供 API，尚无登录页面。
+登录阶段实测：46 个 Java 测试通过，8 个容器健康；登录、权限、过期、退出及故障恢复均已验证。现在已增加 [浏览器工单工作台](docs/浏览器工作台学习与操作.md)，支持登录、查询、退出和请求信息展示。
+
+限流阶段实测（2026-09-07）：54 个 Java 测试通过；真实 HTTP 并发额度、429、窗口恢复和 Redis 故障拒绝通过。启动验收现在会等待限流窗口恢复，通常额外需要约一分钟。
 
 携带有效 token 的演示查询预期返回：
 
@@ -115,7 +118,7 @@ docker compose down
 
 版本依据：[Spring Cloud Alibaba 2023 分支说明](https://sca.aliyun.com/en/docs/2023/overview/version-explain/)、[2023.0.3.2 发布记录](https://github.com/alibaba/spring-cloud-alibaba/releases/tag/2023.0.3.2)、[Nacos Docker 文档](https://www.nacos.io/zh-cn/docs/quick-start-docker.html)。具体兼容性以本项目构建和实测记录为准。
 
-HTTP TraceId 传播和日志关联已实现，操作见 [TraceId学习与操作](docs/TraceId学习与操作.md)。Redis 说明见 [Redis学习与操作](docs/Redis学习与操作.md)。登录、退出和会话权限控制见 [登录鉴权学习与操作](docs/登录鉴权学习与操作.md)。后续实现限流、接入 Kafka，最后迁移到本机 Kubernetes。当前 Nacos 使用单机无鉴权模式、所有对外端口仅绑定本机回环地址。
+HTTP TraceId 传播和日志关联已实现，操作见 [TraceId学习与操作](docs/TraceId学习与操作.md)。Redis 说明见 [Redis学习与操作](docs/Redis学习与操作.md)。登录、退出和会话权限控制见 [登录鉴权学习与操作](docs/登录鉴权学习与操作.md)。登录与工单限流见 [限流学习与操作](docs/限流学习与操作.md)：默认同 IP 30 秒 10 次登录、同用户 10 秒 20 次工单请求，超额返回 429 和 Retry-After。Kafka 按用户要求暂不接入，Kubernetes 尚未迁移。当前 Nacos 使用单机无鉴权模式、所有对外端口仅绑定本机回环地址。
 
 日志查询入口是 `scripts/show-trace.ps1 -TraceId 编号`；正常启动脚本会自动运行 `scripts/verify-trace.ps1`。四个 Java 容器和 Nginx 已配置每文件 10MB、最多 3 个文件的 Docker 日志轮转；容器重建会失去旧容器日志。
 

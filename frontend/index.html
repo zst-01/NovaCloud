@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NovaCloud · 工单工作台</title>
+<link rel="icon" href="data:,"><link rel="stylesheet" href="/styles.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header class="topbar"><a class="brand" href="/" aria-label="NovaCloud 首页"><span class="brand-mark">N</span>NovaCloud<span class="brand-divider"></span><span class="brand-sub">服务工作台</span></a><span class="environment"><i></i>本地实验环境</span></header>
+<main>
+<section class="intro"><div class="eyebrow">WORKSPACE / 01</div><h1>工单工作台<span>。</span></h1><p>从一次查询开始，了解请求经过的每个环节。</p></section>
+<div class="workspace">
+<aside class="card account">
+<div class="section-heading"><span class="step">01</span><h2>账号与访问</h2><span id="session-badge" class="badge">未登录</span></div>
+<div id="signed-out">
+<p class="subtle">登录后查询工单，体验完整服务链路。</p>
+<form id="login-form">
+<label for="username">账号</label><input id="username" name="username" autocomplete="username" value="demo" maxlength="50" required>
+<label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="请输入演示账号密码">
+<button id="login-button" class="primary" type="submit">登录工作台 <span aria-hidden="true">↗</span></button>
+</form>
+<div class="account-note"><strong>演示账号</strong><p><code>demo</code> 可查询工单<br><code>observer</code> 用于体验无权限提示</p><p>初始密码见项目本地 <code>.env</code> 中的 <code>DEMO_PASSWORD</code>。</p></div>
+</div>
+<div id="signed-in" hidden>
+<div class="identity"><div class="avatar" aria-hidden="true">N</div><div><strong id="current-user"></strong><p id="permissions"></p></div></div>
+<div class="session-note"><span class="dot"></span>会话已建立<p>登录状态仅保存在当前页面，刷新后需重新登录。</p></div>
+<button id="logout-button" class="secondary" type="button">退出登录</button>
+</div>
+<div id="login-notice" class="notice" role="status" aria-live="polite" hidden></div>
+</aside>
+<section class="card tickets">
+<div class="section-heading"><span class="step">02</span><h2>查询工单</h2><span class="small-label">TICKET LOOKUP</span></div>
+<p class="subtle">输入工单编号，查看处理状态与详情。</p>
+<form id="ticket-form" class="search-form"><div><label for="ticket-id">工单编号</label><input id="ticket-id" name="ticket-id" inputmode="numeric" value="1" required maxlength="19" aria-describedby="ticket-hint"></div><button id="query-button" class="primary" type="submit">查询工单 <span aria-hidden="true">→</span></button></form>
+<p id="ticket-hint" class="hint">试试编号 <strong>1</strong>；编号 <strong>999999</strong> 可体验工单不存在的提示。</p>
+<div id="query-notice" class="notice" role="status" aria-live="polite" hidden></div>
+<div id="empty-state" class="empty-state"><div class="document-icon" aria-hidden="true">≡</div><h3 id="empty-title">准备好，开始第一次查询</h3><p id="empty-description">先在左侧登录，工单详情将在这里显示。</p></div>
+<article id="ticket-result" class="ticket-result" hidden><div class="result-top"><span class="eyebrow">TICKET DETAILS</span><span id="ticket-status" class="badge success"></span></div><h3 id="ticket-title"></h3><div class="ticket-facts"><div><span>工单编号</span><strong id="result-id"></strong></div><div><span>数据来源</span><strong>中台服务 · MySQL</strong></div></div></article>
+</section>
+</div>
+<section class="card request-card" aria-labelledby="request-heading">
+<div class="section-heading"><span class="step">03</span><h2 id="request-heading">最近一次请求</h2><span class="small-label">REQUEST INSPECTOR</span></div>
+<p class="subtle">用 TraceId 对照后台日志，查看这次请求经过了哪里。</p>
+<div class="request-grid"><div><span class="metric-label">接口</span><code id="request-path">等待请求</code></div><div><span class="metric-label">HTTP 状态</span><strong id="request-status">—</strong></div><div><span class="metric-label">耗时</span><strong id="request-duration">—</strong></div><div class="trace-cell"><span class="metric-label">TraceId</span><div class="trace-value"><code id="request-trace">—</code><button id="copy-trace" class="copy-button" type="button" disabled>复制</button></div></div></div>
+<p id="copy-notice" class="hint" role="status"></p>
+</section>
+<footer><span>NovaCloud Lab</span><span>每一次请求，都有迹可循。</span></footer>
+</main>
+</body>
+</html>

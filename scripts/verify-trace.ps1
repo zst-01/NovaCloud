@@ -7,7 +7,7 @@ try {
     $authHeaders = New-LabSession -BaseUrl $BaseUrl
     $samples = [System.Collections.Generic.List[object]]::new()
     foreach ($case in @(@{Id='1';Status=200}, @{Id='999999';Status=404}, @{Id='invalid';Status=400})) {
-        $response = Invoke-WebRequest "$BaseUrl/api/tickets/$($case.Id)" -Headers ($authHeaders + @{'X-Trace-Id'='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}) -SkipHttpErrorCheck -TimeoutSec 20
+        $response = Invoke-LabWebRequest "$BaseUrl/api/tickets/$($case.Id)" -Headers ($authHeaders + @{'X-Trace-Id'='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}) -SkipHttpErrorCheck -TimeoutSec 20
         $trace = @($response.Headers['X-Trace-Id'])
         if ($trace.Count -ne 1 -or $trace[0] -cnotmatch '^[0-9a-f]{32}$') { throw '响应必须只有一个合法 X-Trace-Id' }
         if ($trace[0] -eq 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') { throw 'Nginx 未替换外部编号' }
@@ -17,13 +17,15 @@ try {
     }
     # 在入口和网关提前结束的请求，也应留下相应环节的编号和错误日志。
     foreach ($case in @(@{Path='/missing';Hops=@('nginx')}, @{Path='/api/missing';Hops=@('nginx','app-gateway')})) {
-        $r = Invoke-WebRequest "$BaseUrl$($case.Path)" -Headers $authHeaders -SkipHttpErrorCheck -TimeoutSec 20
+        $r = Invoke-LabWebRequest "$BaseUrl$($case.Path)" -Headers $authHeaders -SkipHttpErrorCheck -TimeoutSec 20
         if ($r.StatusCode -ne 404) { throw '不存在的入口或网关路由应返回 404' }
         $samples.Add(@{Trace=@($r.Headers['X-Trace-Id'])[0];Status=404;Hops=$case.Hops})
     }
     # 并发请求必须分别得到不同编号；后面检查每一条编号在五层的完整日志。
+    $helperPath = "$PSScriptRoot/auth-session.ps1"
     $parallel = 1..6 | ForEach-Object -Parallel {
-        $r = Invoke-WebRequest "$using:BaseUrl/api/tickets/1" -Headers $using:authHeaders -TimeoutSec 20
+        . $using:helperPath
+        $r = Invoke-LabWebRequest "$using:BaseUrl/api/tickets/1" -Headers $using:authHeaders -TimeoutSec 20
         @{Trace=@($r.Headers['X-Trace-Id'])[0];Status=[int]$r.StatusCode;Hops=@('nginx','app-gateway','app-service','platform-gateway','platform-service')}
     } -ThrottleLimit 6
     foreach ($sample in $parallel) { $samples.Add($sample) }
@@ -31,7 +33,7 @@ try {
         try {
             docker compose stop platform-gateway
             if ($LASTEXITCODE -ne 0) { throw '停止中台网关失败' }
-            $r = Invoke-WebRequest "$BaseUrl/api/tickets/1" -Headers $authHeaders -SkipHttpErrorCheck -TimeoutSec 20
+            $r = Invoke-LabWebRequest "$BaseUrl/api/tickets/1" -Headers $authHeaders -SkipHttpErrorCheck -TimeoutSec 20
             if ($r.StatusCode -notin @(502,504)) { throw "故障应返回 502 或 504，实际 $($r.StatusCode)" }
             $samples.Add(@{Trace=@($r.Headers['X-Trace-Id'])[0];Status=[int]$r.StatusCode;Hops=@('nginx','app-gateway','app-service')})
         } finally {

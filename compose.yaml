@@ -222,6 +222,8 @@ services:
       # 把项目里的 Nginx 配置文件挂载成容器内部真正读取的 nginx.conf。
       # :ro 表示只读，容器不能修改宿主机上的原文件。
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # 浏览器页面由同一 Nginx 提供，前端通过 /api 访问现有服务链路。
+      - ./frontend:/usr/share/nginx/html:ro
     # app-gateway 健康后再启动 Nginx，减少入口已启动但后端尚不可用的情况。
     depends_on:
       app-gateway: {condition: service_healthy}
